@@ -31,6 +31,10 @@ const ota = document.getElementById("ota");
 var startDelay = 5;
 var countdownDuration = 5;
 let raceCancelled = false;
+var visualCountdownInterval = null;
+var pilotReadyTimeoutID = null;
+var countdownBeeperTimeoutID = null;
+var countdownIntervalID = null;
 
 var enterRssi = 120,
   exitRssi = 100;
@@ -465,62 +469,96 @@ function doSpeak(obj) {
 
 function startRace() {
   raceCancelled = false; 
-  stopRaceButton.disabled = false; 
+  stopRaceButton.disabled = false; // Enable stop button immediately.
   startRaceButton.disabled = true;
   queueSpeak('<p>Starting race</p>');
   
   const totalDelay = startDelay * 1000;
+  const startTime = Date.now();
+  
+  // Start visual countdown clock: update every 100 ms.
+  visualCountdownInterval = setInterval(() => {
+    if (raceCancelled) {
+      clearInterval(visualCountdownInterval);
+      return;
+    }
+    const elapsed = Date.now() - startTime;
+    const remainingTime = totalDelay - elapsed;
+    if (remainingTime <= 0) {
+      document.getElementById('countdownDisplay').textContent = "0.0 s";
+      clearInterval(visualCountdownInterval);
+    } else {
+      document.getElementById('countdownDisplay').textContent = (remainingTime / 1000).toFixed(1) + " s";
+    }
+  }, 100);
+  
   const countdownStart = totalDelay - (countdownDuration * 1000);
   const effectiveCountdownStart = Math.max(countdownStart, 0);
   
   // Schedule "Pilot ready" 3 seconds before countdown starts, if possible.
   if (effectiveCountdownStart > 3000) {
-    setTimeout(() => {
+    pilotReadyTimeoutID = setTimeout(() => {
       if (raceCancelled) return;
       queueSpeak('<p>Pilot ready</p>');
     }, effectiveCountdownStart - 3000);
   }
   
-  // After the delay, start the countdown using a recursive setTimeout.
-  setTimeout(() => {
+  // Start countdown beeps after the calculated delay
+  countdownBeeperTimeoutID = setTimeout(() => {
     if (raceCancelled) return;
     let remaining = countdownDuration;
-    let expectedTime = Date.now();
     
-    // Function that performs one countdown tick.
-    function countdownTick() {
-      if (raceCancelled) return;
-      const now = Date.now();
-      
-      // If there are beeps remaining, perform a beep.
-      if (remaining > 0) {
-        beep(100, 440, "square");
-        remaining--;
-        expectedTime += 1000;
-        // Calculate drift and schedule next tick.
-        setTimeout(countdownTick, Math.max(0, expectedTime - Date.now()));
-      } 
-      else {
-        if (raceCancelled) return;
-        // Final beep to signal race start.
-        beep(500, 880, "square");
-        startTimer();
-      }
-    }
-    
-    // Start the countdown immediately with the first tick.
+    // Immediately beep for the first countdown tick
     if (remaining > 0) {
       beep(100, 440, "square");
       remaining--;
-      expectedTime += 1000;
     }
-    setTimeout(countdownTick, 1000);
+    
+    countdownIntervalID = setInterval(() => {
+      if (raceCancelled) {
+        clearInterval(countdownIntervalID);
+        return;
+      }
+      if (remaining > 0) {
+        beep(100, 440, "square");
+        remaining--;
+      } else {
+        clearInterval(countdownIntervalID);
+        if (raceCancelled) return;
+        // Final beep to signal race start
+        beep(500, 880, "square");
+        // Clear the visual countdown display now that the race starts
+        document.getElementById('countdownDisplay').textContent = "";
+        startTimer();
+      }
+    }, 1000);
   }, effectiveCountdownStart);
 }
 
-
 function stopRace() {
   raceCancelled = true;
+  
+  // Clear pending timeouts and intervals
+  if (visualCountdownInterval) {
+    clearInterval(visualCountdownInterval);
+    visualCountdownInterval = null;
+  }
+  if (pilotReadyTimeoutID) {
+    clearTimeout(pilotReadyTimeoutID);
+    pilotReadyTimeoutID = null;
+  }
+  if (countdownBeeperTimeoutID) {
+    clearTimeout(countdownBeeperTimeoutID);
+    countdownBeeperTimeoutID = null;
+  }
+  if (countdownIntervalID) {
+    clearInterval(countdownIntervalID);
+    countdownIntervalID = null;
+  }
+  
+  // Clear the visual countdown display immediately
+  document.getElementById('countdownDisplay').textContent = "";
+  
   queueSpeak('<p>Race stopped</p>');
   clearInterval(timerInterval);
   timer.innerHTML = "00:00:00 s";
@@ -532,8 +570,8 @@ function stopRace() {
       "Content-Type": "application/json",
     },
   })
-    .then((response) => response.json())
-    .then((response) => console.log("/timer/stop:" + JSON.stringify(response)));
+  .then((response) => response.json())
+  .then((response) => console.log("/timer/stop:" + JSON.stringify(response)));
 
   stopRaceButton.disabled = true;
   startRaceButton.disabled = false;

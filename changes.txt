@@ -1,0 +1,1 @@
+02/20/2025 - The last changes made were to add a visual countdown timer and make the stopRace function also stop all the timing that was happening. 
